@@ -8,6 +8,7 @@ interface SmartAgentProps {
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   notes: MeetingNote[];
   phases: ProjectPhase[];
+  setNotes?: React.Dispatch<React.SetStateAction<MeetingNote[]>>;
 }
 
 interface Message {
@@ -16,10 +17,10 @@ interface Message {
   isError?: boolean;
 }
 
-export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases }) => {
+export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases, setNotes }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'היי! אני העוזר החכם של הפרויקט. אני יכול לעזור בניהול משימות, ניתוח פגישות ומעקב סטטוס. איך לעזור?' }
+    { role: 'assistant', content: 'היי! אני העוזר החכם של הפרויקט. אני יכול:\n\n✅ לנתח תמלילי פגישות וליצור משימות אוטומטית\n✅ לענות על שאלות על המשימות והצוות\n✅ לתת המלצות מקצועיות לניהול הפרויקט\n\nפשוט הדבק כאן תמליל פגישה או שאל אותי שאלה!' }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -52,24 +53,70 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       // בניית ההקשר של הפרויקט
       const systemMessage = {
         role: 'system',
-        content: `אתה עוזר חכם לניהול פרויקט "מוזיאון העמק".
+        content: `אתה מומחה בכיר לניהול פרויקטי בניית אתרים, עם ניסיון ספציפי בשיפוץ ושדרוג אתרים קיימים למוסדות תרבות ומוזיאונים. 
 
-נתוני הפרויקט:
+תפקידך הוא לסייע בניהול כל שלבי הפרויקט להקמת אתר חדש ומתקדם עבור 'מוזיאון העמק'.
+
+הקשר הפרויקט:
+- אתר קיים: https://pioneers.co.il/
+- מטרת הפרויקט: בניית אתר חדיש ומתקדם שיחליף את הקיים
+- מפרט טכני והצעת מחיר: https://eliran48.github.io/WiseGuys/Haemek2.html
+
+שלושת השלבים המרכזיים:
+1. איפיון (Planning & Scoping): הגדרת דרישות, מבנה אתר (Sitemap), פונקציונליות
+2. עיצוב (Design): הנחיות עיצוביות, UX/UI מתאימות למוזיאון
+3. פיתוח (Development): תכנון טכני, בחירת טכנולוגיות, פתרון בעיות
+
+נתוני הפרויקט הנוכחיים:
 - חברי צוות: ${TEAM_MEMBERS.map(m => `${m.name} (${m.role})`).join(', ')}
 - סה"כ משימות: ${tasks.length}
 - משימות פתוחות: ${tasks.filter(t => t.status === TaskStatus.TODO).length}
 - משימות בביצוע: ${tasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length}
 - משימות שהושלמו: ${tasks.filter(t => t.status === TaskStatus.DONE).length}
 - סה"כ הערות פגישות: ${notes.length}
-- שלבי הפרויקט: ${phases.length}
 
-תפקידך:
-1. לענות על שאלות על המשימות והפרויקט בעברית
-2. לעזור בניתוח סטטוס הפרויקט
-3. להציע המלצות לשיפור ניהול הפרויקט
-4. לסכם פגישות ומידע
+סיכומי פגישות שמורים (זמינים בלשונית "סיכומי פגישות"):
+${notes.length > 0 ? notes.map(note => `
+  📅 ${note.title} (${note.date})
+  תוכן: ${note.content}
+`).join('\n') : 'אין עדיין סיכומי פגישות'}
 
-תמיד תענה בעברית בצורה ברורה, ממוקדת ושימושית.`
+יכולות מיוחדות - ניתוח פגישות ויצירת משימות:
+כאשר המשתמש מעלה תמליל פגישה או מבקש לנתח שיחה, עליך:
+1. לנתח את התוכן ולזהות משימות, החלטות והמלצות
+2. להציע רשימת משימות מפורטת בפורמט JSON
+3. להקצות כל משימה לאדם המתאים מהצוות (בהתבסס על תפקידו)
+4. להציע תאריכי יעד הגיוניים
+5. לספק סיכום מקיף של הפגישה
+
+חשוב: כאשר יוצרים משימות, המשתמש יקבל הודעה שהמשימות נוספו למערכת, 
+והסיכום נשמר בסעיף "סיכומי פגישות" באפליקציה.
+
+פורמט JSON למשימות (השתמש בו כאשר מזהים משימות):
+\`\`\`json
+{
+  "tasks": [
+    {
+      "title": "כותרת המשימה",
+      "description": "תיאור מפורט",
+      "assignee": "שם חבר צוות",
+      "dueDate": "YYYY-MM-DD"
+    }
+  ],
+  "summary": "סיכום הפגישה"
+}
+\`\`\`
+
+כיצד לסייע:
+1. ענה על שאלות בהתבסס על המפרט והנתונים הקיימים
+2. תן המלצות מקצועיות לניהול הפרויקט
+3. נתח פגישות וחלץ משימות אוטומטית בפורמט JSON
+4. סייע בפתרון בעיות טכניות ועיצוביות
+5. סכם פגישות והצע צעדים הבאים
+6. התייחס לשלב הפרויקט הרלוונטי (איפיון/עיצוב/פיתוח)
+7. שמור על פרספקטיבה של מוסד תרבותי ומוזיאון
+
+תמיד תענה בעברית בצורה מקצועית, מפורטת ומעשית.`
       };
 
       // בניית היסטוריית השיחה
@@ -77,7 +124,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
         systemMessage,
         ...messages
           .filter(m => !m.isError)
-          .slice(1) // דילוג על הודעת פתיחה
+          .slice(1)
           .map(m => ({
             role: m.role === 'assistant' ? 'assistant' : 'user',
             content: m.content
@@ -93,10 +140,10 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini', // זול ומהיר
+          model: 'gpt-4o-mini',
           messages: conversationHistory,
           temperature: 0.7,
-          max_tokens: 1000
+          max_tokens: 2000
         })
       });
 
@@ -112,7 +159,64 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
         throw new Error('לא התקבלה תשובה מ-OpenAI');
       }
 
-      setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
+      // בדיקה אם התשובה מכילה JSON עם משימות
+      const jsonMatch = assistantMessage.match(/```json\n([\s\S]*?)\n```/);
+      
+      if (jsonMatch) {
+        try {
+          const parsedData = JSON.parse(jsonMatch[1]);
+          
+          if (parsedData.tasks && Array.isArray(parsedData.tasks)) {
+            // יצירת המשימות אוטומטית
+            const newTasks: Task[] = parsedData.tasks.map((task: any) => {
+              const assignee = TEAM_MEMBERS.find(m => 
+                m.name.includes(task.assignee) || 
+                task.assignee.includes(m.name.split(' ')[0])
+              ) || TEAM_MEMBERS[0];
+
+              return {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                title: task.title,
+                description: task.description || '',
+                assigneeId: assignee.id,
+                status: TaskStatus.TODO,
+                dueDate: task.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+              };
+            });
+
+            setTasks(prev => [...prev, ...newTasks]);
+
+            // הוספת הערת פגישה אם יש סיכום
+            if (parsedData.summary && setNotes) {
+              const newNote: MeetingNote = {
+                id: Date.now().toString(),
+                title: `ניתוח פגישה - ${new Date().toLocaleDateString('he-IL')}`,
+                content: parsedData.summary,
+                date: new Date().toISOString().split('T')[0],
+                attendees: []
+              };
+              setNotes(prev => [...prev, newNote]);
+            }
+
+            // הודעה מותאמת למשתמש
+            const tasksCreatedMsg = `✅ **נוצרו ${newTasks.length} משימות חדשות!**\n\nהמשימות נוספו למערכת והוקצו לחברי הצוות הרלוונטיים.\n\n${parsedData.summary && setNotes ? '📝 סיכום הפגישה נשמר ב**"סיכומי פגישות"**' : ''}`;
+            
+            const responseWithConfirmation = assistantMessage.replace(
+              jsonMatch[0],
+              tasksCreatedMsg
+            );
+            
+            setMessages(prev => [...prev, { role: 'assistant', content: responseWithConfirmation }]);
+          } else {
+            setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
+          }
+        } catch (parseError) {
+          console.error('Failed to parse JSON:', parseError);
+          setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
+        }
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
+      }
 
     } catch (error: any) {
       console.error("OpenAI Error:", error);
@@ -195,7 +299,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="כתוב הודעה... (למשל: מה המשימות הפתוחות?)"
+                placeholder="כתוב הודעה, הדבק תמליל פגישה, או שאל שאלה..."
                 className="w-full bg-slate-100 text-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-12"
               />
               <button
