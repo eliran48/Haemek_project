@@ -73,7 +73,6 @@ export const MeetingNotes: React.FC<MeetingNotesProps> = ({ onAddTask }) => {
   const handleConvertToTask = (text: string) => {
     if (onAddTask) {
       onAddTask(text);
-      // Optional: Give feedback or mark as done locally?
       alert(`המשימה "${text}" נוצרה בהצלחה בלוח המשימות!`);
     }
   };

@@ -16,7 +16,7 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [phases, setPhases] = useState<ProjectPhase[]>(INITIAL_PHASES);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
-
+  
   // Helper to add task from MeetingNotes
   const handleAddTaskFromNote = (title: string) => {
     const newTask: Task = {
