@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Type, FunctionDeclaration, Content, Part } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Bot, Send, Sparkles, Loader2, Minimize2 } from 'lucide-react';
 import { Task, MeetingNote, ProjectPhase, TaskStatus } from '../types';
 import { TEAM_MEMBERS } from '../constants';
@@ -12,7 +12,7 @@ interface SmartAgentProps {
 }
 
 interface Message {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'model';
   content: string;
   isError?: boolean;
 }
@@ -20,7 +20,7 @@ interface Message {
 export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'היי! אני העוזר החכם של הפרויקט (מופעל ע"י Gemini). אני יכול לעבור על סיכומי הפגישות, לייצר משימות ולענות על שאלות. איך אפשר לעזור?' }
+    { role: 'model', content: 'היי! אני העוזר החכם של הפרויקט. אני יכול לעזור בניהול משימות, ניתוח פגישות ומעקב סטטוס. איך לעזור?' }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -34,182 +34,161 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     scrollToBottom();
   }, [messages, isOpen]);
 
-  // --- Tools Definition (Gemini Format) ---
-
-  const createTaskTool: FunctionDeclaration = {
-    name: "createTask",
-    description: "Create a new task in the project management system.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        title: { type: Type.STRING, description: "The title of the task" },
-        description: { type: Type.STRING, description: "Details about the task" },
-        assigneeName: { type: Type.STRING, description: "The first name of the team member to assign (e.g., Eliran, Rafael, Yossi)" },
-        dueDate: { type: Type.STRING, description: "Due date in YYYY-MM-DD format. If not specified, use today." }
-      },
-      required: ["title"]
+  // --- הגדרת הכלים (Tools) לשימוש המודל ---
+  const toolsFunctions: Record<string, Function> = {
+    createTask: (args: any) => {
+      console.log("Creating task with args:", args);
+      const assignee = TEAM_MEMBERS.find(m => 
+        m.name.includes(args.assigneeName) || 
+        m.name.split(' ')[0] === args.assigneeName
+      ) || TEAM_MEMBERS[0];
+      
+      const newTask: Task = {
+        id: Date.now().toString() + Math.random().toString().slice(2, 5),
+        title: args.title,
+        description: args.description || '',
+        assigneeId: assignee.id,
+        status: TaskStatus.TODO,
+        dueDate: args.dueDate || new Date().toISOString().split('T')[0]
+      };
+      
+      setTasks(prev => [...prev, newTask]);
+      return { success: true, message: `נוצרה משימה חדשה: "${newTask.title}" עבור ${assignee.name}` };
+    },
+    updateTaskStatus: (args: any) => {
+      console.log("Updating task with args:", args);
+      const statusMap: Record<string, TaskStatus> = {
+        'TODO': TaskStatus.TODO,
+        'IN_PROGRESS': TaskStatus.IN_PROGRESS,
+        'DONE': TaskStatus.DONE
+      };
+      
+      let updated = false;
+      setTasks(prev => prev.map(t => {
+          if (t.id === args.taskId) {
+              updated = true;
+              return { ...t, status: statusMap[args.status] || t.status };
+          }
+          return t;
+      }));
+      return { success: updated, message: updated ? "הסטטוס עודכן בהצלחה" : "לא נמצאה משימה עם המזהה הזה" };
     }
   };
 
-  const updateTaskStatusTool: FunctionDeclaration = {
-    name: "updateTaskStatus",
-    description: "Update the status of an existing task.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        taskId: { type: Type.STRING, description: "The ID of the task to update" },
-        status: { type: Type.STRING, enum: ["TODO", "IN_PROGRESS", "DONE"], description: "The new status" }
-      },
-      required: ["taskId", "status"]
-    }
-  };
-
-  // --- API Interaction ---
-
+  // --- פונקציית השליחה ל-API ---
   const handleSend = async () => {
     if (!inputValue.trim()) return;
 
     const userMsg = inputValue;
     setInputValue('');
     
-    // Update UI immediately with user message
-    const newMessages = [...messages, { role: 'user' as const, content: userMsg }];
-    setMessages(newMessages);
+    // הוספת הודעת המשתמש למסך
+    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setIsLoading(true);
 
     try {
-      // Initialize Gemini client using process.env.API_KEY
-apiKey: import.meta.env.VITE_GEMINI_API_KEY
-      const systemContext = `
-        You are a smart Project Manager Assistant for the "Valley Museum" project.
-        
-        CURRENT PROJECT STATE:
-        - Team Members: ${JSON.stringify(TEAM_MEMBERS.map(m => ({ id: m.id, name: m.name, role: m.role })))}
-        - Tasks: ${JSON.stringify(tasks)}
-        - Meeting Notes: ${JSON.stringify(notes)}
-        - Project Phases: ${JSON.stringify(phases)}
-
-        Your capabilities:
-        1. Answer questions about the project status, meeting notes, and risks.
-        2. Create new tasks using the 'createTask' tool. Try to find the correct assignee ID based on the name provided.
-        3. Update task status using 'updateTaskStatus' tool.
-        
-        When creating tasks from meeting notes, analyze the action items in the notes and create relevant tasks.
-        Always reply in Hebrew unless requested otherwise.
-        Keep responses concise and professional.
-      `;
-
-      // Prepare conversation history
-      const contents: Content[] = newMessages
-        .filter(m => !m.isError && m.role !== 'system')
-        .map(m => ({
-          role: m.role === 'user' ? 'user' : 'model',
-          parts: [{ text: m.content }]
-        }));
-
-      const modelName = 'gemini-2.5-flash';
-      const tools = [{ functionDeclarations: [createTaskTool, updateTaskStatusTool] }];
-
-      let response = await ai.models.generateContent({
-        model: modelName,
-        contents: contents,
-        config: {
-          systemInstruction: systemContext,
-          tools: tools,
-        },
-      });
-
-      // Handle Function Calls
-      const functionCalls = response.functionCalls;
-      let finalContent = response.text;
-
-      if (functionCalls && functionCalls.length > 0) {
-        // We need to keep the history consistent for the model to understand the tool output
-        // Add the model's tool call turn to history
-        const modelTurn = response.candidates?.[0]?.content;
-        const newHistory = [...contents];
-        if (modelTurn) {
-            newHistory.push(modelTurn);
-        }
-
-        const functionResponseParts: Part[] = [];
-
-        for (const call of functionCalls) {
-          const functionArgs = call.args as any;
-          let functionResult = "";
-
-          if (call.name === 'createTask') {
-            const assignee = TEAM_MEMBERS.find(m => 
-              m.name.includes(functionArgs.assigneeName) || 
-              m.name.split(' ')[0] === functionArgs.assigneeName
-            ) || TEAM_MEMBERS[0];
-            
-            const newTask: Task = {
-              id: Date.now().toString() + Math.random().toString().slice(2, 5),
-              title: functionArgs.title,
-              description: functionArgs.description || '',
-              assigneeId: assignee.id,
-              status: TaskStatus.TODO,
-              dueDate: functionArgs.dueDate || new Date().toISOString().split('T')[0]
-            };
-            
-            setTasks(prev => [...prev, newTask]);
-            functionResult = JSON.stringify({ success: true, message: `Task "${newTask.title}" created with ID ${newTask.id}` });
-          } 
-          else if (call.name === 'updateTaskStatus') {
-             const statusMap: Record<string, TaskStatus> = {
-              'TODO': TaskStatus.TODO,
-              'IN_PROGRESS': TaskStatus.IN_PROGRESS,
-              'DONE': TaskStatus.DONE
-            };
-            
-            let updated = false;
-            setTasks(prev => prev.map(t => {
-                if (t.id === functionArgs.taskId) {
-                    updated = true;
-                    return { ...t, status: statusMap[functionArgs.status] || t.status };
-                }
-                return t;
-            }));
-            
-            functionResult = JSON.stringify({ success: updated, message: updated ? "Status updated" : "Task not found" });
-          }
-
-          functionResponseParts.push({
-             functionResponse: {
-                name: call.name,
-                response: { result: functionResult }
-             }
-          });
-        }
-
-        // Add function response turn
-        newHistory.push({
-            role: 'tool',
-            parts: functionResponseParts
-        });
-
-        // Get final response from model after tools execution
-        const secondResponse = await ai.models.generateContent({
-          model: modelName,
-          contents: newHistory,
-          config: {
-            systemInstruction: systemContext,
-            tools: tools
-          },
-        });
-
-        finalContent = secondResponse.text;
+      // 1. קבלת המפתח בצורה בטוחה
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        throw new Error("חסר מפתח API. אנא וודא שהגדרת את VITE_GEMINI_API_KEY ב-Vercel או ב-.env.local");
       }
 
-      setMessages(prev => [...prev, { role: 'assistant', content: finalContent || 'בוצע.' }]);
+      // 2. אתחול המודל (GenAI)
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        systemInstruction: `
+          You are a smart Project Manager Assistant for the "Valley Museum" project.
+          Current Data:
+          - Team: ${JSON.stringify(TEAM_MEMBERS.map(m => ({ id: m.id, name: m.name })))}
+          - Tasks: ${JSON.stringify(tasks)}
+          - Notes: ${JSON.stringify(notes)}
+          - Phases: ${JSON.stringify(phases)}
+          
+          Capabilities:
+          1. Answer questions in Hebrew.
+          2. Call 'createTask' to add tasks.
+          3. Call 'updateTaskStatus' to change status.
+          
+          Important: When a function is called, simply confirm the action in Hebrew.
+        `,
+        tools: [{
+          functionDeclarations: [
+            {
+              name: "createTask",
+              description: "Create a new task",
+              parameters: {
+                type: "OBJECT" as any,
+                properties: {
+                  title: { type: "STRING" as any },
+                  description: { type: "STRING" as any },
+                  assigneeName: { type: "STRING" as any },
+                  dueDate: { type: "STRING" as any }
+                },
+                required: ["title"]
+              }
+            },
+            {
+              name: "updateTaskStatus",
+              description: "Update task status",
+              parameters: {
+                type: "OBJECT" as any,
+                properties: {
+                  taskId: { type: "STRING" as any },
+                  status: { type: "STRING" as any, enum: ["TODO", "IN_PROGRESS", "DONE"] }
+                },
+                required: ["taskId", "status"]
+              }
+            }
+          ]
+        }]
+      });
+
+      // 3. יצירת היסטוריית שיחה ושליחה
+      const chat = model.startChat({
+        history: messages
+          .filter(m => !m.isError)
+          .map(m => ({ role: m.role, parts: [{ text: m.content }] })),
+      });
+
+      const result = await chat.sendMessage(userMsg);
+      const response = await result.response;
+      
+      // 4. טיפול בקריאות לפונקציה (Function Calls)
+      const functionCalls = response.functionCalls();
+      let finalText = "";
+
+      if (functionCalls && functionCalls.length > 0) {
+        // אם המודל ביקש להריץ פונקציה
+        const functionResponses = functionCalls.map(call => {
+          const apiFunction = toolsFunctions[call.name];
+          const functionResult = apiFunction ? apiFunction(call.args) : { error: "Function not found" };
+          
+          return {
+            functionResponse: {
+              name: call.name,
+              response: { name: call.name, content: functionResult }
+            }
+          };
+        });
+
+        // שליחת התוצאה חזרה למודל
+        const finalResult = await chat.sendMessage(functionResponses);
+        finalText = finalResult.response.text();
+      } else {
+        // אם זו סתם תשובה טקסטואלית
+        finalText = response.text();
+      }
+
+      setMessages(prev => [...prev, { role: 'model', content: finalText }]);
 
     } catch (error: any) {
-      console.error(error);
+      console.error("AI Error:", error);
       const errorMessage = error?.message || 'שגיאה לא ידועה';
       setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: `סליחה, נתקלתי בשגיאה בתקשורת עם השרת (Gemini). \nשגיאה: ${errorMessage}`, 
+        role: 'model', 
+        content: `שגיאה: ${errorMessage}`, 
         isError: true 
       }]);
     } finally {
@@ -229,32 +208,26 @@ apiKey: import.meta.env.VITE_GEMINI_API_KEY
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all hover:scale-105 flex items-center gap-2 group"
+          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all hover:scale-105 flex items-center gap-2 group"
         >
           <Bot size={28} />
           <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap font-medium pr-2">
             התייעץ איתי
           </span>
-          <div className="absolute -top-1 -right-1">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-            </span>
-          </div>
         </button>
       )}
 
       {isOpen && (
         <div className="bg-white rounded-2xl shadow-2xl w-[350px] md:w-[400px] flex flex-col overflow-hidden border border-slate-200 animate-fade-in-up" style={{ height: '550px', maxHeight: '80vh' }}>
           {/* Header */}
-          <div className="bg-gradient-to-r from-green-600 to-teal-600 p-4 flex justify-between items-center text-white">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 flex justify-between items-center text-white">
             <div className="flex items-center gap-2">
               <div className="bg-white/20 p-1.5 rounded-lg">
                 <Sparkles size={18} />
               </div>
               <div>
                 <h3 className="font-bold">Wise Agent (Gemini)</h3>
-                <p className="text-xs text-green-100">מחובר למערכת הפרויקט</p>
+                <p className="text-xs text-blue-100">מחובר למערכת הפרויקט</p>
               </div>
             </div>
             <button onClick={() => setIsOpen(false)} className="hover:bg-white/20 p-1 rounded transition-colors">
@@ -269,7 +242,7 @@ apiKey: import.meta.env.VITE_GEMINI_API_KEY
                 <div
                   className={`max-w-[85%] rounded-2xl p-3 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-green-600 text-white rounded-br-none'
+                      ? 'bg-blue-600 text-white rounded-br-none'
                       : 'bg-white text-slate-700 border border-slate-200 shadow-sm rounded-bl-none'
                   } ${msg.isError ? 'bg-red-50 text-red-600 border-red-200' : ''}`}
                 >
@@ -280,7 +253,7 @@ apiKey: import.meta.env.VITE_GEMINI_API_KEY
             {isLoading && (
               <div className="flex justify-end">
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm flex items-center gap-2">
-                  <Loader2 size={16} className="animate-spin text-green-500" />
+                  <Loader2 size={16} className="animate-spin text-blue-500" />
                   <span className="text-xs text-slate-500">חושב...</span>
                 </div>
               </div>
@@ -296,12 +269,12 @@ apiKey: import.meta.env.VITE_GEMINI_API_KEY
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyPress}
                 placeholder="כתוב הודעה... (למשל: צור משימה מהפגישה האחרונה)"
-                className="w-full bg-slate-100 text-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none h-12"
+                className="w-full bg-slate-100 text-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-12"
               />
               <button
                 onClick={handleSend}
                 disabled={!inputValue.trim() || isLoading}
-                className="absolute left-2 p-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="absolute left-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <Send size={16} className={isLoading ? 'opacity-0' : 'opacity-100'} />
                 {isLoading && <span className="absolute inset-0 flex items-center justify-center"><Loader2 size={12} className="animate-spin" /></span>}
