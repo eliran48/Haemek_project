@@ -97,9 +97,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       // 2. אתחול המודל (GenAI)
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ 
-        const model = genAI.getGenerativeModel({ 
   model: "gemini-1.5-pro-latest",
-  systemInstruction: `
         systemInstruction: `
           You are a smart Project Manager Assistant for the "Valley Museum" project.
           Current Data:
