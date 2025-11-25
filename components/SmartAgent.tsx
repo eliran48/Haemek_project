@@ -16,7 +16,7 @@ interface Message {
   content: string;
   isError?: boolean;
 }
-// update key fix
+
 export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -97,7 +97,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       // 2. אתחול המודל (GenAI)
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ 
-  model: "gemini-1.5-pro-latest",
+        model: "gemini-pro",
         systemInstruction: `
           You are a smart Project Manager Assistant for the "Valley Museum" project.
           Current Data:
@@ -146,22 +146,21 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       });
 
       // 3. יצירת היסטוריית שיחה ושליחה
-const chatHistory = messages
-  .filter(m => !m.isError)
-  .slice(1) // דילוג על הודעת הפתיחה של המודל
-  .map(m => ({
-    role: m.role,
-    parts: [{ text: m.content }],
-  }));
+      const chatHistory = messages
+        .filter(m => !m.isError)
+        .slice(1) // דילוג על הודעת הפתיחה של המודל
+        .map(m => ({
+          role: m.role,
+          parts: [{ text: m.content }],
+        }));
 
-const chat = model.startChat({
-  history: chatHistory,
-});
+      const chat = model.startChat({
+        history: chatHistory,
+      });
 
-const result = await chat.sendMessage(userMsg);
-const response = await result.response;
+      const result = await chat.sendMessage(userMsg);
+      const response = await result.response;
 
-      
       // 4. טיפול בקריאות לפונקציה (Function Calls)
       const functionCalls = response.functionCalls();
       let finalText = "";
