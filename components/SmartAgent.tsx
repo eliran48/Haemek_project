@@ -34,48 +34,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     scrollToBottom();
   }, [messages, isOpen]);
 
-  // --- הגדרת הכלים (Tools) לשימוש המודל ---
-  const toolsFunctions: Record<string, Function> = {
-    createTask: (args: any) => {
-      console.log("Creating task with args:", args);
-      const assignee = TEAM_MEMBERS.find(m => 
-        m.name.includes(args.assigneeName) || 
-        m.name.split(' ')[0] === args.assigneeName
-      ) || TEAM_MEMBERS[0];
-      
-      const newTask: Task = {
-        id: Date.now().toString() + Math.random().toString().slice(2, 5),
-        title: args.title,
-        description: args.description || '',
-        assigneeId: assignee.id,
-        status: TaskStatus.TODO,
-        dueDate: args.dueDate || new Date().toISOString().split('T')[0]
-      };
-      
-      setTasks(prev => [...prev, newTask]);
-      return { success: true, message: `נוצרה משימה חדשה: "${newTask.title}" עבור ${assignee.name}` };
-    },
-    updateTaskStatus: (args: any) => {
-      console.log("Updating task with args:", args);
-      const statusMap: Record<string, TaskStatus> = {
-        'TODO': TaskStatus.TODO,
-        'IN_PROGRESS': TaskStatus.IN_PROGRESS,
-        'DONE': TaskStatus.DONE
-      };
-      
-      let updated = false;
-      setTasks(prev => prev.map(t => {
-          if (t.id === args.taskId) {
-              updated = true;
-              return { ...t, status: statusMap[args.status] || t.status };
-          }
-          return t;
-      }));
-      return { success: updated, message: updated ? "הסטטוס עודכן בהצלחה" : "לא נמצאה משימה עם המזהה הזה" };
-    }
-  };
-
-  // --- פונקציית השליחה ל-API ---
+  // --- פונקציית השליחה ל-API (גרסה פשוטה) ---
   const handleSend = async () => {
     if (!inputValue.trim()) return;
 
@@ -94,107 +53,68 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
         throw new Error("חסר מפתח API. אנא וודא שהגדרת את VITE_GEMINI_API_KEY ב-Vercel או ב-.env.local");
       }
 
-      // 2. אתחול המודל (GenAI)
+      // 2. ניסיון למצוא מודל זמין
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash-002",
-        systemInstruction: `
-          You are a smart Project Manager Assistant for the "Valley Museum" project.
-          Current Data:
-          - Team: ${JSON.stringify(TEAM_MEMBERS.map(m => ({ id: m.id, name: m.name })))}
-          - Tasks: ${JSON.stringify(tasks)}
-          - Notes: ${JSON.stringify(notes)}
-          - Phases: ${JSON.stringify(phases)}
+      
+      // רשימת מודלים לנסות לפי סדר עדיפות
+      const modelsToTry = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-002", 
+        "gemini-1.5-flash-latest",
+        "gemini-pro",
+        "gemini-1.5-pro",
+        "models/gemini-1.5-flash",
+        "models/gemini-pro"
+      ];
+
+      let model = null;
+      let lastError = null;
+
+      // ננסה כל מודל עד שאחד עובד
+      for (const modelName of modelsToTry) {
+        try {
+          const testModel = genAI.getGenerativeModel({ model: modelName });
           
-          Capabilities:
-          1. Answer questions in Hebrew.
-          2. Call 'createTask' to add tasks.
-          3. Call 'updateTaskStatus' to change status.
+          // בניית ההקשר של הפרויקט
+          const context = `
+אתה עוזר חכם לניהול פרויקט "מוזיאון העמק".
+נתונים נוכחיים:
+- צוות: ${JSON.stringify(TEAM_MEMBERS.map(m => ({ id: m.id, name: m.name })))}
+- משימות: ${JSON.stringify(tasks)}
+- הערות פגישות: ${JSON.stringify(notes)}
+- שלבי פרויקט: ${JSON.stringify(phases)}
+
+תענה בעברית ותעזור בניהול המשימות והפרויקט.
+`;
+
+          const prompt = `${context}\n\nשאלת המשתמש: ${userMsg}`;
+          const result = await testModel.generateContent(prompt);
+          const response = await result.response;
+          const text = response.text();
           
-          Important: When a function is called, simply confirm the action in Hebrew.
-        `,
-        tools: [{
-          functionDeclarations: [
-            {
-              name: "createTask",
-              description: "Create a new task",
-              parameters: {
-                type: "OBJECT" as any,
-                properties: {
-                  title: { type: "STRING" as any },
-                  description: { type: "STRING" as any },
-                  assigneeName: { type: "STRING" as any },
-                  dueDate: { type: "STRING" as any }
-                },
-                required: ["title"]
-              }
-            },
-            {
-              name: "updateTaskStatus",
-              description: "Update task status",
-              parameters: {
-                type: "OBJECT" as any,
-                properties: {
-                  taskId: { type: "STRING" as any },
-                  status: { type: "STRING" as any, enum: ["TODO", "IN_PROGRESS", "DONE"] }
-                },
-                required: ["taskId", "status"]
-              }
-            }
-          ]
-        }]
-      });
-
-      // 3. יצירת היסטוריית שיחה ושליחה
-      const chatHistory = messages
-        .filter(m => !m.isError)
-        .slice(1) // דילוג על הודעת הפתיחה של המודל
-        .map(m => ({
-          role: m.role,
-          parts: [{ text: m.content }],
-        }));
-
-      const chat = model.startChat({
-        history: chatHistory,
-      });
-
-      const result = await chat.sendMessage(userMsg);
-      const response = await result.response;
-
-      // 4. טיפול בקריאות לפונקציה (Function Calls)
-      const functionCalls = response.functionCalls();
-      let finalText = "";
-
-      if (functionCalls && functionCalls.length > 0) {
-        // אם המודל ביקש להריץ פונקציה
-        const functionResponses = functionCalls.map(call => {
-          const apiFunction = toolsFunctions[call.name];
-          const functionResult = apiFunction ? apiFunction(call.args) : { error: "Function not found" };
+          // אם הגענו לכאן, המודל עובד!
+          model = testModel;
+          setMessages(prev => [...prev, { role: 'model', content: text }]);
+          break;
           
-          return {
-            functionResponse: {
-              name: call.name,
-              response: { name: call.name, content: functionResult }
-            }
-          };
-        });
-
-        // שליחת התוצאה חזרה למודל
-        const finalResult = await chat.sendMessage(functionResponses);
-        finalText = finalResult.response.text();
-      } else {
-        // אם זו סתם תשובה טקסטואלית
-        finalText = response.text();
+        } catch (error: any) {
+          lastError = error;
+          console.log(`Failed with model ${modelName}:`, error.message);
+          continue; // ננסה את המודל הבא
+        }
       }
 
-      setMessages(prev => [...prev, { role: 'model', content: finalText }]);
+      // אם אף מודל לא עבד
+      if (!model && lastError) {
+        throw new Error(`לא נמצא מודל זמין. השגיאה האחרונה: ${lastError.message}`);
+      }
 
     } catch (error: any) {
       console.error("AI Error:", error);
       const errorMessage = error?.message || 'שגיאה לא ידועה';
       setMessages(prev => [...prev, { 
         role: 'model', 
-        content: `שגיאה: ${errorMessage}`, 
+        content: `שגיאה: ${errorMessage}. נסה לבדוק את מפתח ה-API ב-Vercel Environment Variables.`, 
         isError: true 
       }]);
     } finally {
@@ -274,7 +194,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="כתוב הודעה... (למשל: צור משימה מהפגישה האחרונה)"
+                placeholder="כתוב הודעה... (למשל: מה המשימות הפתוחות?)"
                 className="w-full bg-slate-100 text-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-12"
               />
               <button
