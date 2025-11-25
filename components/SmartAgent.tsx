@@ -78,7 +78,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     setIsLoading(true);
 
     try {
-      // Initialize Gemini client
+      // Initialize Gemini client using process.env.API_KEY
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       const systemContext = `
@@ -108,7 +108,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
           parts: [{ text: m.content }]
         }));
 
-      const modelName = 'gemini-3-pro-preview';
+      const modelName = 'gemini-2.5-flash';
       const tools = [{ functionDeclarations: [createTaskTool, updateTaskStatusTool] }];
 
       let response = await ai.models.generateContent({
