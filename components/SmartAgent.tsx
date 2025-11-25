@@ -146,21 +146,21 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       });
 
       // 3. יצירת היסטוריית שיחה ושליחה
-      const chatHistory = messages
+const chatHistory = messages
   .filter(m => !m.isError)
-  .slice(1); // דילוג על הודעת הפתיחה של המודל
-
-const chat = model.startChat({
-  history: chatHistory.map(m => ({
+  .slice(1) // דילוג על הודעת הפתיחה של המודל
+  .map(m => ({
     role: m.role,
     parts: [{ text: m.content }],
-  })),
+  }));
+
+const chat = model.startChat({
+  history: chatHistory,
 });
 
-      });
+const result = await chat.sendMessage(userMsg);
+const response = await result.response;
 
-      const result = await chat.sendMessage(userMsg);
-      const response = await result.response;
       
       // 4. טיפול בקריאות לפונקציה (Function Calls)
       const functionCalls = response.functionCalls();
