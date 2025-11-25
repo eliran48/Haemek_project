@@ -16,7 +16,7 @@ interface Message {
   content: string;
   isError?: boolean;
 }
-
+// update key fix
 export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
