@@ -11,7 +11,7 @@ interface SmartAgentProps {
 }
 
 interface Message {
-  role: 'user' | 'model';
+  role: 'user' | 'assistant';
   content: string;
   isError?: boolean;
 }
@@ -19,7 +19,7 @@ interface Message {
 export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'model', content: 'היי! אני העוזר החכם של הפרויקט. אני יכול לעזור בניהול משימות, ניתוח פגישות ומעקב סטטוס. איך לעזור?' }
+    { role: 'assistant', content: 'היי! אני העוזר החכם של הפרויקט. אני יכול לעזור בניהול משימות, ניתוח פגישות ומעקב סטטוס. איך לעזור?' }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -33,7 +33,6 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     scrollToBottom();
   }, [messages, isOpen]);
 
-  // --- קריאה ישירה ל-Gemini API עם fetch ---
   const handleSend = async () => {
     if (!inputValue.trim()) return;
 
@@ -44,87 +43,82 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     setIsLoading(true);
 
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
       
       if (!apiKey) {
-        throw new Error("חסר מפתח API. אנא וודא שהגדרת את VITE_GEMINI_API_KEY ב-Vercel");
+        throw new Error("חסר מפתח OpenAI API. אנא הגדר את VITE_OPENAI_API_KEY ב-Vercel");
       }
 
-      // בניית הקונטקסט
-      const context = `
-אתה עוזר חכם לניהול פרויקט "מוזיאון העמק".
-נתונים נוכחיים:
-- צוות: ${TEAM_MEMBERS.map(m => m.name).join(', ')}
-- משימות פעילות: ${tasks.filter(t => t.status !== TaskStatus.DONE).length}
+      // בניית ההקשר של הפרויקט
+      const systemMessage = {
+        role: 'system',
+        content: `אתה עוזר חכם לניהול פרויקט "מוזיאון העמק".
+
+נתוני הפרויקט:
+- חברי צוות: ${TEAM_MEMBERS.map(m => `${m.name} (${m.role})`).join(', ')}
+- סה"כ משימות: ${tasks.length}
+- משימות פתוחות: ${tasks.filter(t => t.status === TaskStatus.TODO).length}
+- משימות בביצוע: ${tasks.filter(t => t.status === TaskStatus.IN_PROGRESS).length}
 - משימות שהושלמו: ${tasks.filter(t => t.status === TaskStatus.DONE).length}
 - סה"כ הערות פגישות: ${notes.length}
+- שלבי הפרויקט: ${phases.length}
 
-תענה בעברית בצורה ברורה וממוקדת.
-`;
+תפקידך:
+1. לענות על שאלות על המשימות והפרויקט בעברית
+2. לעזור בניתוח סטטוס הפרויקט
+3. להציע המלצות לשיפור ניהול הפרויקט
+4. לסכם פגישות ומידע
 
-      const fullPrompt = `${context}\n\nשאלת המשתמש: ${userMsg}`;
+תמיד תענה בעברית בצורה ברורה, ממוקדת ושימושית.`
+      };
 
-      // רשימת endpoints לנסות (v1 במקום v1beta!)
-      const modelsToTry = [
-        { version: 'v1', model: 'gemini-1.5-flash' },
-        { version: 'v1', model: 'gemini-1.5-pro' },
-        { version: 'v1', model: 'gemini-pro' },
-        { version: 'v1beta', model: 'gemini-1.5-flash' },
-        { version: 'v1beta', model: 'gemini-pro' }
+      // בניית היסטוריית השיחה
+      const conversationHistory = [
+        systemMessage,
+        ...messages
+          .filter(m => !m.isError)
+          .slice(1) // דילוג על הודעת פתיחה
+          .map(m => ({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: m.content
+          })),
+        { role: 'user', content: userMsg }
       ];
 
-      let responseText = null;
-      let lastError = null;
+      // קריאה ל-OpenAI API
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini', // זול ומהיר
+          messages: conversationHistory,
+          temperature: 0.7,
+          max_tokens: 1000
+        })
+      });
 
-      for (const { version, model } of modelsToTry) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${apiKey}`;
-          
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [{
-                parts: [{
-                  text: fullPrompt
-                }]
-              }]
-            })
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(`${response.status}: ${errorData.error?.message || 'Unknown error'}`);
-          }
-
-          const data = await response.json();
-          
-          if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-            responseText = data.candidates[0].content.parts[0].text;
-            console.log(`✅ Success with ${version}/${model}`);
-            break;
-          }
-          
-        } catch (error: any) {
-          lastError = error;
-          console.log(`❌ Failed with ${version}/${model}:`, error.message);
-          continue;
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
       }
 
-      if (responseText) {
-        setMessages(prev => [...prev, { role: 'model', content: responseText }]);
-      } else {
-        throw new Error(`כל המודלים נכשלו. שגיאה אחרונה: ${lastError?.message || 'לא ידוע'}`);
+      const data = await response.json();
+      const assistantMessage = data.choices[0]?.message?.content;
+
+      if (!assistantMessage) {
+        throw new Error('לא התקבלה תשובה מ-OpenAI');
       }
+
+      setMessages(prev => [...prev, { role: 'assistant', content: assistantMessage }]);
 
     } catch (error: any) {
-      console.error("AI Error:", error);
+      console.error("OpenAI Error:", error);
       setMessages(prev => [...prev, { 
-        role: 'model', 
-        content: `שגיאה: ${error.message}. ודא שהמפתח API תקין ושהפרויקט ב-Google AI Studio הוא "Gemini API".`, 
+        role: 'assistant', 
+        content: `שגיאה: ${error.message}. ודא שהמפתח VITE_OPENAI_API_KEY מוגדר ב-Vercel.`, 
         isError: true 
       }]);
     } finally {
@@ -161,7 +155,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
                 <Sparkles size={18} />
               </div>
               <div>
-                <h3 className="font-bold">Wise Agent (Gemini)</h3>
+                <h3 className="font-bold">Wise Agent (ChatGPT)</h3>
                 <p className="text-xs text-blue-100">מחובר למערכת הפרויקט</p>
               </div>
             </div>
