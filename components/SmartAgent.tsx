@@ -1,7 +1,5 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
-import type { FunctionDeclaration, Part } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration, Content, Part } from "@google/genai";
 import { Bot, Send, Sparkles, Loader2, Minimize2 } from 'lucide-react';
 import { Task, MeetingNote, ProjectPhase, TaskStatus } from '../types';
 import { TEAM_MEMBERS } from '../constants';
@@ -14,15 +12,15 @@ interface SmartAgentProps {
 }
 
 interface Message {
-  role: 'user' | 'model';
-  text: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
   isError?: boolean;
 }
 
 export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'model', text: 'היי! אני העוזר החכם של הפרויקט. אני יכול לעבור על סיכומי הפגישות, לייצר משימות ולענות על שאלות. איך אפשר לעזור?' }
+    { role: 'assistant', content: 'היי! אני העוזר החכם של הפרויקט (מופעל ע"י Gemini). אני יכול לעבור על סיכומי הפגישות, לייצר משימות ולענות על שאלות. איך אפשר לעזור?' }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,33 +34,33 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     scrollToBottom();
   }, [messages, isOpen]);
 
-  // --- Tools Definition ---
+  // --- Tools Definition (Gemini Format) ---
 
   const createTaskTool: FunctionDeclaration = {
-    name: 'createTask',
-    description: 'Create a new task in the project management system.',
+    name: "createTask",
+    description: "Create a new task in the project management system.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        title: { type: Type.STRING, description: 'The title of the task' },
-        description: { type: Type.STRING, description: 'Details about the task' },
-        assigneeName: { type: Type.STRING, description: 'The first name of the team member to assign (e.g., Eliran, Rafael, Yossi)' },
-        dueDate: { type: Type.STRING, description: 'Due date in YYYY-MM-DD format. If not specified, use today.' }
+        title: { type: Type.STRING, description: "The title of the task" },
+        description: { type: Type.STRING, description: "Details about the task" },
+        assigneeName: { type: Type.STRING, description: "The first name of the team member to assign (e.g., Eliran, Rafael, Yossi)" },
+        dueDate: { type: Type.STRING, description: "Due date in YYYY-MM-DD format. If not specified, use today." }
       },
-      required: ['title']
+      required: ["title"]
     }
   };
 
   const updateTaskStatusTool: FunctionDeclaration = {
-    name: 'updateTaskStatus',
-    description: 'Update the status of an existing task.',
+    name: "updateTaskStatus",
+    description: "Update the status of an existing task.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        taskId: { type: Type.STRING, description: 'The ID of the task to update' },
-        status: { type: Type.STRING, description: 'The new status: "TODO", "IN_PROGRESS", or "DONE"' }
+        taskId: { type: Type.STRING, description: "The ID of the task to update" },
+        status: { type: Type.STRING, enum: ["TODO", "IN_PROGRESS", "DONE"], description: "The new status" }
       },
-      required: ['taskId', 'status']
+      required: ["taskId", "status"]
     }
   };
 
@@ -73,12 +71,16 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
 
     const userMsg = inputValue;
     setInputValue('');
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    
+    // Update UI immediately with user message
+    const newMessages = [...messages, { role: 'user' as const, content: userMsg }];
+    setMessages(newMessages);
     setIsLoading(true);
 
     try {
+      // Initialize Gemini client
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
+
       const systemContext = `
         You are a smart Project Manager Assistant for the "Valley Museum" project.
         
@@ -98,88 +100,119 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
         Keep responses concise and professional.
       `;
 
-      const chat = ai.chats.create({
-        model: 'gemini-2.5-flash',
+      // Prepare conversation history
+      const contents: Content[] = newMessages
+        .filter(m => !m.isError && m.role !== 'system')
+        .map(m => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          parts: [{ text: m.content }]
+        }));
+
+      const modelName = 'gemini-3-pro-preview';
+      const tools = [{ functionDeclarations: [createTaskTool, updateTaskStatusTool] }];
+
+      let response = await ai.models.generateContent({
+        model: modelName,
+        contents: contents,
         config: {
           systemInstruction: systemContext,
-          tools: [{ functionDeclarations: [createTaskTool, updateTaskStatusTool] }],
-        }
+          tools: tools,
+        },
       });
 
-      const historyText = messages.slice(1).map(m => `${m.role === 'user' ? 'User' : 'Model'}: ${m.text}`).join('\n');
-      const fullPrompt = historyText ? `${historyText}\n\nUser: ${userMsg}` : userMsg;
-
-      const result = await chat.sendMessage({ message: fullPrompt });
-      
       // Handle Function Calls
-      const calls = result.functionCalls;
-      let finalResponseText = result.text || '';
+      const functionCalls = response.functionCalls;
+      let finalContent = response.text;
 
-      if (calls && calls.length > 0) {
-        const toolParts: Part[] = [];
-        
-        for (const call of calls) {
+      if (functionCalls && functionCalls.length > 0) {
+        // We need to keep the history consistent for the model to understand the tool output
+        // Add the model's tool call turn to history
+        const modelTurn = response.candidates?.[0]?.content;
+        const newHistory = [...contents];
+        if (modelTurn) {
+            newHistory.push(modelTurn);
+        }
+
+        const functionResponseParts: Part[] = [];
+
+        for (const call of functionCalls) {
+          const functionArgs = call.args as any;
+          let functionResult = "";
+
           if (call.name === 'createTask') {
-            const args = call.args as any;
-            // Find assignee ID
-            const assignee = TEAM_MEMBERS.find(m => m.name.includes(args.assigneeName) || m.name.split(' ')[0] === args.assigneeName) || TEAM_MEMBERS[0];
+            const assignee = TEAM_MEMBERS.find(m => 
+              m.name.includes(functionArgs.assigneeName) || 
+              m.name.split(' ')[0] === functionArgs.assigneeName
+            ) || TEAM_MEMBERS[0];
             
             const newTask: Task = {
               id: Date.now().toString() + Math.random().toString().slice(2, 5),
-              title: args.title,
-              description: args.description || '',
+              title: functionArgs.title,
+              description: functionArgs.description || '',
               assigneeId: assignee.id,
               status: TaskStatus.TODO,
-              dueDate: args.dueDate || new Date().toISOString().split('T')[0]
+              dueDate: functionArgs.dueDate || new Date().toISOString().split('T')[0]
             };
             
             setTasks(prev => [...prev, newTask]);
-            
-            toolParts.push({
-                functionResponse: {
-                    name: call.name,
-                    id: call.id,
-                    response: { result: `Task "${newTask.title}" created successfully with ID ${newTask.id}` }
-                }
-            });
-          }
+            functionResult = JSON.stringify({ success: true, message: `Task "${newTask.title}" created with ID ${newTask.id}` });
+          } 
           else if (call.name === 'updateTaskStatus') {
-            const args = call.args as any;
-            const statusMap: Record<string, TaskStatus> = {
+             const statusMap: Record<string, TaskStatus> = {
               'TODO': TaskStatus.TODO,
               'IN_PROGRESS': TaskStatus.IN_PROGRESS,
               'DONE': TaskStatus.DONE
             };
             
+            let updated = false;
             setTasks(prev => prev.map(t => {
-                if (t.id === args.taskId) {
-                    return { ...t, status: statusMap[args.status] || t.status };
+                if (t.id === functionArgs.taskId) {
+                    updated = true;
+                    return { ...t, status: statusMap[functionArgs.status] || t.status };
                 }
                 return t;
             }));
-
-            toolParts.push({
-                functionResponse: {
-                    name: call.name,
-                    id: call.id,
-                    response: { result: `Task ${args.taskId} status updated.` }
-                }
-            });
+            
+            functionResult = JSON.stringify({ success: updated, message: updated ? "Status updated" : "Task not found" });
           }
+
+          functionResponseParts.push({
+             functionResponse: {
+                name: call.name,
+                response: { result: functionResult }
+             }
+          });
         }
 
-        // Send function execution results back to the model using sendMessage with parts
-        if (toolParts.length > 0) {
-          const responseWithTools = await chat.sendMessage({ message: toolParts as any });
-          finalResponseText = responseWithTools.text || '';
-        }
+        // Add function response turn
+        newHistory.push({
+            role: 'tool',
+            parts: functionResponseParts
+        });
+
+        // Get final response from model after tools execution
+        const secondResponse = await ai.models.generateContent({
+          model: modelName,
+          contents: newHistory,
+          config: {
+            systemInstruction: systemContext,
+            tools: tools
+          },
+        });
+
+        finalContent = secondResponse.text;
       }
 
-      setMessages(prev => [...prev, { role: 'model', text: finalResponseText }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: finalContent || 'בוצע.' }]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: 'סליחה, נתקלתי בשגיאה בתקשורת עם השרת. אנא ודא שמפתח ה-API מוגדר כראוי.', isError: true }]);
+      const errorMessage = error?.message || 'שגיאה לא ידועה';
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `סליחה, נתקלתי בשגיאה בתקשורת עם השרת (Gemini). \nשגיאה: ${errorMessage}`, 
+        isError: true 
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -197,7 +230,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all hover:scale-105 flex items-center gap-2 group"
+          className="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all hover:scale-105 flex items-center gap-2 group"
         >
           <Bot size={28} />
           <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap font-medium pr-2">
@@ -205,8 +238,8 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
           </span>
           <div className="absolute -top-1 -right-1">
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
             </span>
           </div>
         </button>
@@ -215,14 +248,14 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       {isOpen && (
         <div className="bg-white rounded-2xl shadow-2xl w-[350px] md:w-[400px] flex flex-col overflow-hidden border border-slate-200 animate-fade-in-up" style={{ height: '550px', maxHeight: '80vh' }}>
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 flex justify-between items-center text-white">
+          <div className="bg-gradient-to-r from-green-600 to-teal-600 p-4 flex justify-between items-center text-white">
             <div className="flex items-center gap-2">
               <div className="bg-white/20 p-1.5 rounded-lg">
                 <Sparkles size={18} />
               </div>
               <div>
-                <h3 className="font-bold">Wise Agent</h3>
-                <p className="text-xs text-blue-100">מחובר למערכת הפרויקט</p>
+                <h3 className="font-bold">Wise Agent (Gemini)</h3>
+                <p className="text-xs text-green-100">מחובר למערכת הפרויקט</p>
               </div>
             </div>
             <button onClick={() => setIsOpen(false)} className="hover:bg-white/20 p-1 rounded transition-colors">
@@ -237,18 +270,18 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
                 <div
                   className={`max-w-[85%] rounded-2xl p-3 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-blue-600 text-white rounded-br-none'
+                      ? 'bg-green-600 text-white rounded-br-none'
                       : 'bg-white text-slate-700 border border-slate-200 shadow-sm rounded-bl-none'
                   } ${msg.isError ? 'bg-red-50 text-red-600 border-red-200' : ''}`}
                 >
-                  {msg.text}
+                  {msg.content}
                 </div>
               </div>
             ))}
             {isLoading && (
               <div className="flex justify-end">
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none p-3 shadow-sm flex items-center gap-2">
-                  <Loader2 size={16} className="animate-spin text-blue-500" />
+                  <Loader2 size={16} className="animate-spin text-green-500" />
                   <span className="text-xs text-slate-500">חושב...</span>
                 </div>
               </div>
@@ -264,12 +297,12 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyPress}
                 placeholder="כתוב הודעה... (למשל: צור משימה מהפגישה האחרונה)"
-                className="w-full bg-slate-100 text-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-12"
+                className="w-full bg-slate-100 text-slate-800 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none h-12"
               />
               <button
                 onClick={handleSend}
                 disabled={!inputValue.trim() || isLoading}
-                className="absolute left-2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="absolute left-2 p-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <Send size={16} className={isLoading ? 'opacity-0' : 'opacity-100'} />
                 {isLoading && <span className="absolute inset-0 flex items-center justify-center"><Loader2 size={12} className="animate-spin" /></span>}
