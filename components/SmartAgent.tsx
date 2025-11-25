@@ -1,8 +1,9 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import type { FunctionDeclaration, Part } from "@google/genai";
-import { Bot, X, Send, Sparkles, Loader2, Minimize2 } from 'lucide-react';
-import { Task, MeetingNote, ProjectPhase, TeamMember, TaskStatus } from '../types';
+import { Bot, Send, Sparkles, Loader2, Minimize2 } from 'lucide-react';
+import { Task, MeetingNote, ProjectPhase, TaskStatus } from '../types';
 import { TEAM_MEMBERS } from '../constants';
 
 interface SmartAgentProps {
@@ -178,7 +179,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
 
     } catch (error) {
       console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: 'סליחה, נתקלתי בשגיאה בתקשורת עם השרת. אנא נסה שוב.', isError: true }]);
+      setMessages(prev => [...prev, { role: 'model', text: 'סליחה, נתקלתי בשגיאה בתקשורת עם השרת. אנא ודא שמפתח ה-API מוגדר כראוי.', isError: true }]);
     } finally {
       setIsLoading(false);
     }

@@ -1,5 +1,5 @@
 
-import { TeamMember, Role, ProjectPhase, ModuleCost, Task, TaskStatus } from './types';
+import { TeamMember, Role, ProjectPhase, ModuleCost, Task, TaskStatus, MeetingNote } from './types';
 
 export const TEAM_MEMBERS: TeamMember[] = [
   { 
@@ -73,4 +73,18 @@ export const INITIAL_TASKS: Task[] = [
   { id: '101', title: 'איסוף חומרים לדרייב', description: 'העלאת טקסטים ותמונות ע"י הלקוח', assigneeId: '5', status: TaskStatus.IN_PROGRESS, dueDate: '2025-12-01' },
   { id: '102', title: 'עיצוב סקיצה ראשונית', description: 'עמוד הבית + עמוד פנימי', assigneeId: '2', status: TaskStatus.TODO, dueDate: '2025-12-05' },
   { id: '103', title: 'הקמת סביבת פיתוח', description: 'התקנת וורדפרס ואלמנטור בשרת זמני', assigneeId: '3', status: TaskStatus.TODO, dueDate: '2025-12-10' },
+];
+
+export const INITIAL_NOTES: MeetingNote[] = [
+    {
+      id: '1',
+      date: '2025-11-24',
+      title: 'פגישת התנעה - מוזיאון העמק',
+      content: 'סוכם על לוח זמנים.\n- אלירן ישלח חוזה\n- הלקוח יעביר חומרים עד סוף שבוע\n- רפאל יכין סקיצה',
+      actionItems: [
+        { text: 'אלירן ישלח חוזה', isDone: true },
+        { text: 'הלקוח יעביר חומרים עד סוף שבוע', isDone: false },
+        { text: 'רפאל יכין סקיצה', isDone: false }
+      ]
+    }
 ];

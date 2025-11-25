@@ -1,12 +1,13 @@
 
 import React, { useState } from 'react';
-import { INITIAL_PHASES, INITIAL_TASKS, TEAM_MEMBERS } from './constants';
-import { ProjectPhase, Task, TaskStatus } from './types';
+import { INITIAL_PHASES, INITIAL_TASKS, TEAM_MEMBERS, INITIAL_NOTES } from './constants';
+import { ProjectPhase, Task, TaskStatus, MeetingNote } from './types';
 import { Dashboard } from './components/Dashboard';
 import { TaskBoard } from './components/TaskBoard';
 import { ProjectScope } from './components/ProjectScope';
 import { MeetingNotes } from './components/MeetingNotes';
 import { TeamResources } from './components/TeamResources';
+import { SmartAgent } from './components/SmartAgent';
 import { LayoutDashboard, CheckSquare, FileText, Settings, Menu, X, Users } from 'lucide-react';
 
 type View = 'dashboard' | 'tasks' | 'scope' | 'notes' | 'team';
@@ -16,6 +17,7 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [phases, setPhases] = useState<ProjectPhase[]>(INITIAL_PHASES);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [notes, setNotes] = useState<MeetingNote[]>(INITIAL_NOTES);
   
   // Helper to add task from MeetingNotes
   const handleAddTaskFromNote = (title: string) => {
@@ -112,11 +114,14 @@ const App: React.FC = () => {
         <div className="animate-fade-in">
             {currentView === 'dashboard' && <Dashboard phases={phases} tasks={tasks} />}
             {currentView === 'tasks' && <TaskBoard tasks={tasks} setTasks={setTasks} />}
-            {currentView === 'notes' && <MeetingNotes onAddTask={handleAddTaskFromNote} />}
+            {currentView === 'notes' && <MeetingNotes notes={notes} setNotes={setNotes} onAddTask={handleAddTaskFromNote} />}
             {currentView === 'team' && <TeamResources />}
             {currentView === 'scope' && <ProjectScope />}
         </div>
       </main>
+
+      {/* AI Assistant */}
+      <SmartAgent tasks={tasks} setTasks={setTasks} notes={notes} phases={phases} />
 
       {/* Overlay for mobile menu */}
       {isMobileMenuOpen && (

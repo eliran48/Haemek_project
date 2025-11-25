@@ -4,24 +4,12 @@ import { MeetingNote } from '../types';
 import { FileText, Plus, CheckSquare, Save, Trash, ArrowLeftCircle } from 'lucide-react';
 
 interface MeetingNotesProps {
+  notes: MeetingNote[];
+  setNotes: React.Dispatch<React.SetStateAction<MeetingNote[]>>;
   onAddTask?: (title: string) => void;
 }
 
-export const MeetingNotes: React.FC<MeetingNotesProps> = ({ onAddTask }) => {
-  const [notes, setNotes] = useState<MeetingNote[]>([
-    {
-      id: '1',
-      date: '2025-11-24',
-      title: 'פגישת התנעה - מוזיאון העמק',
-      content: 'סוכם על לוח זמנים.\n- אלירן ישלח חוזה\n- הלקוח יעביר חומרים עד סוף שבוע\n- רפאל יכין סקיצה',
-      actionItems: [
-        { text: 'אלירן ישלח חוזה', isDone: true },
-        { text: 'הלקוח יעביר חומרים עד סוף שבוע', isDone: false },
-        { text: 'רפאל יכין סקיצה', isDone: false }
-      ]
-    }
-  ]);
-
+export const MeetingNotes: React.FC<MeetingNotesProps> = ({ notes, setNotes, onAddTask }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentTitle, setCurrentTitle] = useState('');
   const [currentContent, setCurrentContent] = useState('');
