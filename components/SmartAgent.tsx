@@ -79,8 +79,7 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
 
     try {
       // Initialize Gemini client using process.env.API_KEY
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
+apiKey: import.meta.env.VITE_GEMINI_API_KEY
       const systemContext = `
         You are a smart Project Manager Assistant for the "Valley Museum" project.
         
