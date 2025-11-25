@@ -146,10 +146,17 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
       });
 
       // 3. יצירת היסטוריית שיחה ושליחה
-      const chat = model.startChat({
-        history: messages
-          .filter(m => !m.isError)
-          .map(m => ({ role: m.role, parts: [{ text: m.content }] })),
+      const chatHistory = messages
+  .filter(m => !m.isError)
+  .slice(1); // דילוג על הודעת הפתיחה של המודל
+
+const chat = model.startChat({
+  history: chatHistory.map(m => ({
+    role: m.role,
+    parts: [{ text: m.content }],
+  })),
+});
+
       });
 
       const result = await chat.sendMessage(userMsg);
