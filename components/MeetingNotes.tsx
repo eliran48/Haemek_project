@@ -2,14 +2,15 @@
 import React, { useState } from 'react';
 import { MeetingNote } from '../types';
 import { FileText, Plus, CheckSquare, Save, Trash, ArrowLeftCircle } from 'lucide-react';
+import { db } from '../firebase';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 interface MeetingNotesProps {
   notes: MeetingNote[];
-  setNotes: React.Dispatch<React.SetStateAction<MeetingNote[]>>;
   onAddTask?: (title: string) => void;
 }
 
-export const MeetingNotes: React.FC<MeetingNotesProps> = ({ notes, setNotes, onAddTask }) => {
+export const MeetingNotes: React.FC<MeetingNotesProps> = ({ notes, onAddTask }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentTitle, setCurrentTitle] = useState('');
   const [currentContent, setCurrentContent] = useState('');
@@ -26,36 +27,48 @@ export const MeetingNotes: React.FC<MeetingNotesProps> = ({ notes, setNotes, onA
     return items;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!currentTitle || !currentContent) return;
 
-    const newNote: MeetingNote = {
-      id: Date.now().toString(),
-      date: new Date().toISOString().split('T')[0],
-      title: currentTitle,
-      content: currentContent,
-      actionItems: parseActionItems(currentContent)
-    };
-
-    setNotes([newNote, ...notes]);
-    setIsEditing(false);
-    setCurrentTitle('');
-    setCurrentContent('');
+    try {
+        const newNote = {
+            date: new Date().toISOString().split('T')[0],
+            title: currentTitle,
+            content: currentContent,
+            actionItems: parseActionItems(currentContent)
+        };
+        await addDoc(collection(db, 'notes'), newNote);
+        
+        setIsEditing(false);
+        setCurrentTitle('');
+        setCurrentContent('');
+    } catch (error) {
+        console.error("Error saving note:", error);
+    }
   };
 
-  const toggleItem = (noteId: string, itemIndex: number) => {
-    setNotes(notes.map(note => {
-      if (note.id === noteId) {
-        const newItems = [...note.actionItems];
-        newItems[itemIndex].isDone = !newItems[itemIndex].isDone;
-        return { ...note, actionItems: newItems };
-      }
-      return note;
-    }));
+  const toggleItem = async (noteId: string, itemIndex: number) => {
+    const note = notes.find(n => n.id === noteId);
+    if (!note) return;
+
+    const newItems = [...note.actionItems];
+    newItems[itemIndex].isDone = !newItems[itemIndex].isDone;
+
+    try {
+        await updateDoc(doc(db, 'notes', noteId), { actionItems: newItems });
+    } catch (error) {
+        console.error("Error updating checklist:", error);
+    }
   };
 
-  const deleteNote = (id: string) => {
-    setNotes(notes.filter(n => n.id !== id));
+  const deleteNote = async (id: string) => {
+    if (window.confirm("האם למחוק סיכום זה?")) {
+        try {
+            await deleteDoc(doc(db, 'notes', id));
+        } catch (error) {
+            console.error("Error deleting note:", error);
+        }
+    }
   };
 
   const handleConvertToTask = (text: string) => {
@@ -145,7 +158,7 @@ export const MeetingNotes: React.FC<MeetingNotesProps> = ({ notes, setNotes, onA
               {note.content}
             </div>
 
-            {note.actionItems.length > 0 && (
+            {note.actionItems && note.actionItems.length > 0 && (
               <div className="bg-slate-50 rounded-lg p-4 mt-auto">
                 <h4 className="font-bold text-xs text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                   <CheckSquare size={14} />

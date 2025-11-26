@@ -1,39 +1,52 @@
+
 import React, { useState } from 'react';
 import { Task, TaskStatus, TeamMember } from '../types';
 import { TEAM_MEMBERS } from '../constants';
 import { Plus, Calendar, User, Trash2 } from 'lucide-react';
+import { db } from '../firebase';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 
 interface TaskBoardProps {
   tasks: Task[];
-  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
 }
 
-export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks }) => {
+export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks }) => {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [selectedAssignee, setSelectedAssignee] = useState(TEAM_MEMBERS[0].id);
 
-  const handleAddTask = (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
 
-    const newTask: Task = {
-      id: Date.now().toString(),
-      title: newTaskTitle,
-      assigneeId: selectedAssignee,
-      status: TaskStatus.TODO,
-      dueDate: new Date().toISOString().split('T')[0],
-    };
-
-    setTasks([...tasks, newTask]);
-    setNewTaskTitle('');
+    try {
+        const newTask = {
+            title: newTaskTitle,
+            assigneeId: selectedAssignee,
+            status: TaskStatus.TODO,
+            dueDate: new Date().toISOString().split('T')[0],
+        };
+        await addDoc(collection(db, 'tasks'), newTask);
+        setNewTaskTitle('');
+    } catch (error) {
+        console.error("Error adding task:", error);
+    }
   };
 
-  const updateTaskStatus = (taskId: string, newStatus: TaskStatus) => {
-    setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+  const updateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
+    try {
+        const taskRef = doc(db, 'tasks', taskId);
+        await updateDoc(taskRef, { status: newStatus });
+    } catch (error) {
+        console.error("Error updating task:", error);
+    }
   };
 
-  const deleteTask = (taskId: string) => {
-    setTasks(tasks.filter(t => t.id !== taskId));
+  const deleteTask = async (taskId: string) => {
+    try {
+        await deleteDoc(doc(db, 'tasks', taskId));
+    } catch (error) {
+        console.error("Error deleting task:", error);
+    }
   };
 
   const getMember = (id: string) => TEAM_MEMBERS.find(m => m.id === id);

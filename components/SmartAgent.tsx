@@ -1,14 +1,16 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Bot, Send, Sparkles, Loader2, Minimize2 } from 'lucide-react';
 import { Task, MeetingNote, ProjectPhase, TaskStatus } from '../types';
 import { TEAM_MEMBERS } from '../constants';
+import { db } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
+import { GoogleGenAI } from "@google/genai";
 
 interface SmartAgentProps {
   tasks: Task[];
-  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   notes: MeetingNote[];
   phases: ProjectPhase[];
-  setNotes?: React.Dispatch<React.SetStateAction<MeetingNote[]>>;
 }
 
 interface Message {
@@ -17,7 +19,7 @@ interface Message {
   isError?: boolean;
 }
 
-export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, phases, setNotes }) => {
+export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, notes, phases }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'היי! אני העוזר החכם של הפרויקט. אני יכול:\n\n✅ לנתח תמלילי פגישות וליצור משימות אוטומטית\n✅ לענות על שאלות על המשימות והצוות\n✅ לתת המלצות מקצועיות לניהול הפרויקט\n\nפשוט הדבק כאן תמליל פגישה או שאל אותי שאלה!' }
@@ -44,16 +46,10 @@ export const SmartAgent: React.FC<SmartAgentProps> = ({ tasks, setTasks, notes, 
     setIsLoading(true);
 
     try {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      
-      if (!apiKey) {
-        throw new Error("חסר מפתח OpenAI API. אנא הגדר את VITE_OPENAI_API_KEY ב-Vercel");
-      }
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       // בניית ההקשר של הפרויקט
-      const systemMessage = {
-        role: 'system',
-        content: `אתה מומחה בכיר לניהול פרויקטי בניית אתרים, עם ניסיון ספציפי בשיפוץ ושדרוג אתרים קיימים למוסדות תרבות ומוזיאונים. 
+      const systemInstruction = `אתה מומחה בכיר לניהול פרויקטי בניית אתרים, עם ניסיון ספציפי בשיפוץ ושדרוג אתרים קיימים למוסדות תרבות ומוזיאונים. 
 
 תפקידך הוא לסייע בניהול כל שלבי הפרויקט להקמת אתר חדש ומתקדם עבור 'מוזיאון העמק'.
 
@@ -116,47 +112,30 @@ ${notes.length > 0 ? notes.map(note => `
 6. התייחס לשלב הפרויקט הרלוונטי (איפיון/עיצוב/פיתוח)
 7. שמור על פרספקטיבה של מוסד תרבותי ומוזיאון
 
-תמיד תענה בעברית בצורה מקצועית, מפורטת ומעשית.`
-      };
+תמיד תענה בעברית בצורה מקצועית, מפורטת ומעשית.`;
 
       // בניית היסטוריית השיחה
-      const conversationHistory = [
-        systemMessage,
-        ...messages
+      const history = messages
           .filter(m => !m.isError)
           .slice(1)
           .map(m => ({
-            role: m.role === 'assistant' ? 'assistant' : 'user',
-            content: m.content
-          })),
-        { role: 'user', content: userMsg }
-      ];
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+          }));
 
-      // קריאה ל-OpenAI API
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+      const chat = ai.chats.create({
+        model: 'gemini-2.5-flash',
+        config: {
+          systemInstruction: systemInstruction,
         },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: conversationHistory,
-          temperature: 0.7,
-          max_tokens: 2000
-        })
+        history: history,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      const assistantMessage = data.choices[0]?.message?.content;
+      const response = await chat.sendMessage({ message: userMsg });
+      const assistantMessage = response.text;
 
       if (!assistantMessage) {
-        throw new Error('לא התקבלה תשובה מ-OpenAI');
+        throw new Error('לא התקבלה תשובה מ-Gemini');
       }
 
       // בדיקה אם התשובה מכילה JSON עם משימות
@@ -167,39 +146,41 @@ ${notes.length > 0 ? notes.map(note => `
           const parsedData = JSON.parse(jsonMatch[1]);
           
           if (parsedData.tasks && Array.isArray(parsedData.tasks)) {
-            // יצירת המשימות אוטומטית
-            const newTasks: Task[] = parsedData.tasks.map((task: any) => {
-              const assignee = TEAM_MEMBERS.find(m => 
-                m.name.includes(task.assignee) || 
-                task.assignee.includes(m.name.split(' ')[0])
-              ) || TEAM_MEMBERS[0];
+            // יצירת המשימות אוטומטית ב-Firebase
+            const newTasksCount = parsedData.tasks.length;
+            
+            for (const task of parsedData.tasks) {
+                const assignee = TEAM_MEMBERS.find(m => 
+                  m.name.includes(task.assignee) || 
+                  task.assignee.includes(m.name.split(' ')[0])
+                ) || TEAM_MEMBERS[0];
 
-              return {
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                title: task.title,
-                description: task.description || '',
-                assigneeId: assignee.id,
-                status: TaskStatus.TODO,
-                dueDate: task.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-              };
-            });
-
-            setTasks(prev => [...prev, ...newTasks]);
+                const newTask = {
+                  title: task.title,
+                  description: task.description || '',
+                  assigneeId: assignee.id,
+                  status: TaskStatus.TODO,
+                  dueDate: task.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                };
+                
+                // Add to Firestore
+                await addDoc(collection(db, 'tasks'), newTask);
+            }
 
             // הוספת הערת פגישה אם יש סיכום
-            if (parsedData.summary && setNotes) {
-              const newNote: MeetingNote = {
-                id: Date.now().toString(),
+            if (parsedData.summary) {
+              const newNote = {
                 title: `ניתוח פגישה - ${new Date().toLocaleDateString('he-IL')}`,
                 content: parsedData.summary,
                 date: new Date().toISOString().split('T')[0],
-                attendees: []
+                actionItems: []
               };
-              setNotes(prev => [...prev, newNote]);
+              // Add to Firestore
+              await addDoc(collection(db, 'notes'), newNote);
             }
 
             // הודעה מותאמת למשתמש
-            const tasksCreatedMsg = `✅ **נוצרו ${newTasks.length} משימות חדשות!**\n\nהמשימות נוספו למערכת והוקצו לחברי הצוות הרלוונטיים.\n\n${parsedData.summary && setNotes ? '📝 סיכום הפגישה נשמר ב**"סיכומי פגישות"**' : ''}`;
+            const tasksCreatedMsg = `✅ **נוצרו ${newTasksCount} משימות חדשות!**\n\nהמשימות נוספו למערכת והוקצו לחברי הצוות הרלוונטיים.\n\n${parsedData.summary ? '📝 סיכום הפגישה נשמר ב**"סיכומי פגישות"**' : ''}`;
             
             const responseWithConfirmation = assistantMessage.replace(
               jsonMatch[0],
@@ -219,10 +200,10 @@ ${notes.length > 0 ? notes.map(note => `
       }
 
     } catch (error: any) {
-      console.error("OpenAI Error:", error);
+      console.error("Gemini Error:", error);
       setMessages(prev => [...prev, { 
         role: 'assistant', 
-        content: `שגיאה: ${error.message}. ודא שהמפתח VITE_OPENAI_API_KEY מוגדר ב-Vercel.`, 
+        content: `שגיאה: ${error.message}.`, 
         isError: true 
       }]);
     } finally {
@@ -259,7 +240,7 @@ ${notes.length > 0 ? notes.map(note => `
                 <Sparkles size={18} />
               </div>
               <div>
-                <h3 className="font-bold">Wise Agent (ChatGPT)</h3>
+                <h3 className="font-bold">Wise Agent (Gemini)</h3>
                 <p className="text-xs text-blue-100">מחובר למערכת הפרויקט</p>
               </div>
             </div>

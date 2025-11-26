@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { INITIAL_PHASES, INITIAL_TASKS, TEAM_MEMBERS, INITIAL_NOTES } from './constants';
 import { ProjectPhase, Task, TaskStatus, MeetingNote } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -9,26 +9,92 @@ import { MeetingNotes } from './components/MeetingNotes';
 import { TeamResources } from './components/TeamResources';
 import { SmartAgent } from './components/SmartAgent';
 import { LayoutDashboard, CheckSquare, FileText, Settings, Menu, X, Users } from 'lucide-react';
+import { db } from './firebase';
+import { collection, onSnapshot, addDoc, getDocs } from 'firebase/firestore';
 
 type View = 'dashboard' | 'tasks' | 'scope' | 'notes' | 'team';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [phases, setPhases] = useState<ProjectPhase[]>(INITIAL_PHASES);
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
-  const [notes, setNotes] = useState<MeetingNote[]>(INITIAL_NOTES);
   
+  const [phases, setPhases] = useState<ProjectPhase[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [notes, setNotes] = useState<MeetingNote[]>([]);
+
+  // Initialize and Sync with Firestore
+  useEffect(() => {
+    // Sync Tasks
+    const unsubscribeTasks = onSnapshot(collection(db, 'tasks'), (snapshot) => {
+      const loadedTasks: Task[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+      setTasks(loadedTasks);
+      
+      // Seed initial tasks if empty
+      if (snapshot.empty && !localStorage.getItem('tasksSeeded')) {
+        INITIAL_TASKS.forEach(async (t) => {
+            const { id, ...data } = t;
+            await addDoc(collection(db, 'tasks'), data);
+        });
+        localStorage.setItem('tasksSeeded', 'true');
+      }
+    });
+
+    // Sync Notes
+    const unsubscribeNotes = onSnapshot(collection(db, 'notes'), (snapshot) => {
+      const loadedNotes: MeetingNote[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MeetingNote));
+      // Sort notes by date desc
+      loadedNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setNotes(loadedNotes);
+
+      // Seed initial notes if empty
+      if (snapshot.empty && !localStorage.getItem('notesSeeded')) {
+         INITIAL_NOTES.forEach(async (n) => {
+            const { id, ...data } = n;
+            await addDoc(collection(db, 'notes'), data);
+         });
+         localStorage.setItem('notesSeeded', 'true');
+      }
+    });
+
+    // Sync Phases
+    const unsubscribePhases = onSnapshot(collection(db, 'phases'), (snapshot) => {
+      const loadedPhases: ProjectPhase[] = snapshot.docs.map(doc => ({ ...doc.data() } as ProjectPhase));
+      // Ensure sorted by ID
+      loadedPhases.sort((a, b) => a.id - b.id);
+      
+      if (loadedPhases.length > 0) {
+          setPhases(loadedPhases);
+      } else if (!localStorage.getItem('phasesSeeded')) {
+        setPhases(INITIAL_PHASES); // Use local for immediate render
+        INITIAL_PHASES.forEach(async (p) => {
+           await addDoc(collection(db, 'phases'), p);
+        });
+        localStorage.setItem('phasesSeeded', 'true');
+      } else {
+        setPhases(INITIAL_PHASES);
+      }
+    });
+
+    return () => {
+        unsubscribeTasks();
+        unsubscribeNotes();
+        unsubscribePhases();
+    };
+  }, []);
+
   // Helper to add task from MeetingNotes
-  const handleAddTaskFromNote = (title: string) => {
-    const newTask: Task = {
-        id: Date.now().toString(),
+  const handleAddTaskFromNote = async (title: string) => {
+    const newTask = {
         title: title,
         assigneeId: TEAM_MEMBERS[0].id, // Default to PM
         status: TaskStatus.TODO,
         dueDate: new Date().toISOString().split('T')[0],
     };
-    setTasks(prev => [...prev, newTask]);
+    try {
+        await addDoc(collection(db, 'tasks'), newTask);
+    } catch (e) {
+        console.error("Error adding task:", e);
+    }
   };
 
   const NavItem = ({ view, label, icon: Icon }: { view: View; label: string; icon: any }) => (
@@ -113,15 +179,16 @@ const App: React.FC = () => {
         
         <div className="animate-fade-in">
             {currentView === 'dashboard' && <Dashboard phases={phases} tasks={tasks} />}
-            {currentView === 'tasks' && <TaskBoard tasks={tasks} setTasks={setTasks} />}
-            {currentView === 'notes' && <MeetingNotes notes={notes} setNotes={setNotes} onAddTask={handleAddTaskFromNote} />}
+            {/* TaskBoard now handles updates internally via Firestore, we just pass tasks for viewing/filtering if needed, but it should likely subscribe itself or receive via props */}
+            {currentView === 'tasks' && <TaskBoard tasks={tasks} />}
+            {currentView === 'notes' && <MeetingNotes notes={notes} onAddTask={handleAddTaskFromNote} />}
             {currentView === 'team' && <TeamResources />}
             {currentView === 'scope' && <ProjectScope />}
         </div>
       </main>
 
       {/* AI Assistant */}
-      <SmartAgent tasks={tasks} setTasks={setTasks} notes={notes} phases={phases} />
+      <SmartAgent tasks={tasks} notes={notes} phases={phases} />
 
       {/* Overlay for mobile menu */}
       {isMobileMenuOpen && (

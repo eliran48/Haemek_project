@@ -1,8 +1,7 @@
 
 import React from 'react';
 import { ProjectPhase, Task, TaskStatus } from '../types';
-import { TEAM_MEMBERS } from '../constants';
-import { Activity, Clock, CheckCircle, ArrowRight } from 'lucide-react';
+import { Activity, Clock, CheckCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface DashboardProps {
@@ -15,7 +14,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ phases, tasks }) => {
   const totalTasks = tasks.length;
   const progress = totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
 
-  const activePhase = phases.find(p => p.status === 'active') || phases[0];
+  const activePhase = phases.find(p => p.status === 'active') || phases[0] || { name: 'טוען...', id: 0 };
 
   const taskData = [
     { name: 'בוצע', value: completedTasks, color: '#4ade80' },
@@ -92,11 +91,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ phases, tasks }) => {
           </div>
         </div>
 
-        {/* Tasks Chart & Team */}
+        {/* Tasks Chart */}
         <div className="space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 h-full flex flex-col justify-between">
             <h3 className="font-bold text-lg text-slate-800 mb-4">סטטוס משימות</h3>
-            <div className="h-48 w-full">
+            <div className="h-48 w-full flex-1">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -116,22 +115,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ phases, tasks }) => {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-             <div className="flex justify-center gap-4 text-xs mt-2">
+             <div className="flex justify-center gap-4 text-xs mt-4">
                 {taskData.map(d => (
                     <div key={d.name} className="flex items-center gap-1">
                         <div className="w-2 h-2 rounded-full" style={{backgroundColor: d.color}}></div>
                         <span>{d.name}</span>
                     </div>
                 ))}
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-lg p-6 text-white">
-            <h3 className="font-bold text-lg mb-2">צריכים עזרה?</h3>
-            <p className="text-slate-300 text-sm mb-4">צוות Wise Guys זמין עבורכם לכל שאלה.</p>
-            <div className="flex items-center gap-2 text-sm text-blue-300 cursor-pointer hover:text-blue-200">
-               <span>לפרטי קשר מלאים</span>
-               <ArrowRight size={16} />
             </div>
           </div>
         </div>

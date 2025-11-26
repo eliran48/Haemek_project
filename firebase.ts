@@ -1,4 +1,5 @@
-import { initializeApp } from "firebase/app";
+import * as firebaseApp from "firebase/app";
+import { getFirestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -12,7 +13,6 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-export const app = initializeApp(firebaseConfig);
-
-// Fix: Analytics imports removed due to "module has no exported member" errors in the current environment.
-export const analytics = null;
+// Use namespace import to access initializeApp
+export const app = firebaseApp.initializeApp(firebaseConfig);
+export const db = getFirestore(app);

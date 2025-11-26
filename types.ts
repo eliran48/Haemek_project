@@ -48,7 +48,13 @@ export interface MeetingNote {
 
 export interface ModuleCost {
   name: string;
-  price: number;
   description: string;
   selected: boolean;
+  features?: string[];
+}
+
+export interface ProposalStep {
+  step: string;
+  title: string;
+  description: string;
 }
