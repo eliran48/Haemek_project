@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { INITIAL_PHASES, INITIAL_TASKS, TEAM_MEMBERS, INITIAL_NOTES } from './constants';
 import { ProjectPhase, Task, TaskStatus, MeetingNote } from './types';
@@ -7,10 +6,9 @@ import { TaskBoard } from './components/TaskBoard';
 import { ProjectScope } from './components/ProjectScope';
 import { MeetingNotes } from './components/MeetingNotes';
 import { TeamResources } from './components/TeamResources';
-import { SmartAgent } from './components/SmartAgent';
-import { LayoutDashboard, CheckSquare, FileText, Settings, Menu, X, Users } from 'lucide-react';
-import { db } from './firebase';
-import { collection, onSnapshot, addDoc, getDocs } from 'firebase/firestore';
+import { LayoutDashboard, CheckSquare, FileText, Settings, Menu, X, Users, Loader2 } from 'lucide-react';
+import { db, waitForAuth } from './firebase';
+import { collection, onSnapshot, addDoc } from 'firebase/firestore';
 
 type View = 'dashboard' | 'tasks' | 'scope' | 'notes' | 'team';
 
@@ -21,64 +19,100 @@ const App: React.FC = () => {
   const [phases, setPhases] = useState<ProjectPhase[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<MeetingNote[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Initialize and Sync with Firestore
   useEffect(() => {
-    // Sync Tasks
-    const unsubscribeTasks = onSnapshot(collection(db, 'tasks'), (snapshot) => {
-      const loadedTasks: Task[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
-      setTasks(loadedTasks);
-      
-      // Seed initial tasks if empty
-      if (snapshot.empty && !localStorage.getItem('tasksSeeded')) {
-        INITIAL_TASKS.forEach(async (t) => {
-            const { id, ...data } = t;
-            await addDoc(collection(db, 'tasks'), data);
+    let unsubscribeTasks: (() => void) | undefined;
+    let unsubscribeNotes: (() => void) | undefined;
+    let unsubscribePhases: (() => void) | undefined;
+
+    const initApp = async () => {
+      try {
+        // 1. Authenticate first to avoid permission errors
+        await waitForAuth();
+
+        // 2. Set up Tasks Listener
+        unsubscribeTasks = onSnapshot(collection(db, 'tasks'), (snapshot) => {
+          const loadedTasks: Task[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
+          setTasks(loadedTasks);
+          
+          // Seed initial tasks if empty
+          if (snapshot.empty && !localStorage.getItem('tasksSeeded')) {
+            INITIAL_TASKS.forEach(async (t) => {
+                const { id, ...data } = t;
+                await addDoc(collection(db, 'tasks'), data);
+            });
+            localStorage.setItem('tasksSeeded', 'true');
+          }
+        }, (error) => {
+            console.error("Tasks sync error:", error);
+            // Fallback to local data
+            setTasks(INITIAL_TASKS);
         });
-        localStorage.setItem('tasksSeeded', 'true');
-      }
-    });
 
-    // Sync Notes
-    const unsubscribeNotes = onSnapshot(collection(db, 'notes'), (snapshot) => {
-      const loadedNotes: MeetingNote[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MeetingNote));
-      // Sort notes by date desc
-      loadedNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setNotes(loadedNotes);
+        // 3. Set up Notes Listener
+        unsubscribeNotes = onSnapshot(collection(db, 'notes'), (snapshot) => {
+          const loadedNotes: MeetingNote[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MeetingNote));
+          // Sort notes by date desc
+          loadedNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setNotes(loadedNotes);
 
-      // Seed initial notes if empty
-      if (snapshot.empty && !localStorage.getItem('notesSeeded')) {
-         INITIAL_NOTES.forEach(async (n) => {
-            const { id, ...data } = n;
-            await addDoc(collection(db, 'notes'), data);
-         });
-         localStorage.setItem('notesSeeded', 'true');
-      }
-    });
-
-    // Sync Phases
-    const unsubscribePhases = onSnapshot(collection(db, 'phases'), (snapshot) => {
-      const loadedPhases: ProjectPhase[] = snapshot.docs.map(doc => ({ ...doc.data() } as ProjectPhase));
-      // Ensure sorted by ID
-      loadedPhases.sort((a, b) => a.id - b.id);
-      
-      if (loadedPhases.length > 0) {
-          setPhases(loadedPhases);
-      } else if (!localStorage.getItem('phasesSeeded')) {
-        setPhases(INITIAL_PHASES); // Use local for immediate render
-        INITIAL_PHASES.forEach(async (p) => {
-           await addDoc(collection(db, 'phases'), p);
+          // Seed initial notes if empty
+          if (snapshot.empty && !localStorage.getItem('notesSeeded')) {
+             INITIAL_NOTES.forEach(async (n) => {
+                const { id, ...data } = n;
+                await addDoc(collection(db, 'notes'), data);
+             });
+             localStorage.setItem('notesSeeded', 'true');
+          }
+        }, (error) => {
+            console.error("Notes sync error:", error);
+            // Fallback to local data
+            setNotes(INITIAL_NOTES);
         });
-        localStorage.setItem('phasesSeeded', 'true');
-      } else {
+
+        // 4. Set up Phases Listener
+        unsubscribePhases = onSnapshot(collection(db, 'phases'), (snapshot) => {
+          const loadedPhases: ProjectPhase[] = snapshot.docs.map(doc => ({ ...doc.data() } as ProjectPhase));
+          // Ensure sorted by ID
+          loadedPhases.sort((a, b) => a.id - b.id);
+          
+          if (loadedPhases.length > 0) {
+              setPhases(loadedPhases);
+          } else if (!localStorage.getItem('phasesSeeded')) {
+            setPhases(INITIAL_PHASES); // Use local for immediate render
+            INITIAL_PHASES.forEach(async (p) => {
+               await addDoc(collection(db, 'phases'), p);
+            });
+            localStorage.setItem('phasesSeeded', 'true');
+          } else {
+            setPhases(INITIAL_PHASES);
+          }
+          setIsLoading(false);
+        }, (error) => {
+            console.error("Phases sync error:", error);
+            // Fallback to local data and stop loading
+            setPhases(INITIAL_PHASES);
+            setIsLoading(false);
+        });
+
+      } catch (error) {
+        console.error("Initialization error:", error);
+        // Ensure we don't get stuck in loading state even if auth fails
         setPhases(INITIAL_PHASES);
+        setTasks(INITIAL_TASKS);
+        setNotes(INITIAL_NOTES);
+        setIsLoading(false);
       }
-    });
+    };
+
+    initApp();
 
     return () => {
-        unsubscribeTasks();
-        unsubscribeNotes();
-        unsubscribePhases();
+        if (unsubscribeTasks) unsubscribeTasks();
+        if (unsubscribeNotes) unsubscribeNotes();
+        if (unsubscribePhases) unsubscribePhases();
     };
   }, []);
 
@@ -94,6 +128,8 @@ const App: React.FC = () => {
         await addDoc(collection(db, 'tasks'), newTask);
     } catch (e) {
         console.error("Error adding task:", e);
+        // Optimistic update if needed or just alert
+        alert("שגיאה ביצירת משימה: בדוק הרשאות או חיבור רשת");
     }
   };
 
@@ -113,6 +149,15 @@ const App: React.FC = () => {
       <span className="font-medium">{label}</span>
     </button>
   );
+
+  if (isLoading) {
+    return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+            <Loader2 size={48} className="text-blue-600 animate-spin mb-4" />
+            <p className="text-slate-500 font-medium">מתחבר למערכת...</p>
+        </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col md:flex-row">
@@ -186,9 +231,6 @@ const App: React.FC = () => {
             {currentView === 'scope' && <ProjectScope />}
         </div>
       </main>
-
-      {/* AI Assistant */}
-      <SmartAgent tasks={tasks} notes={notes} phases={phases} />
 
       {/* Overlay for mobile menu */}
       {isMobileMenuOpen && (

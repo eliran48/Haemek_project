@@ -1,5 +1,6 @@
-import * as firebaseApp from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth, signInAnonymously, onAuthStateChanged, User } from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -13,6 +14,29 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-// Use namespace import to access initializeApp
-export const app = firebaseApp.initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+let authPromise: Promise<User> | null = null;
+
+export const waitForAuth = (): Promise<User> => {
+  if (authPromise) return authPromise;
+
+  authPromise = new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        unsubscribe();
+        resolve(user);
+      } else {
+        // Sign in anonymously if no user
+        signInAnonymously(auth).catch((error) => {
+           console.error("Error signing in anonymously:", error);
+           // Depending on needs, could reject or retry, 
+           // but keeping the promise pending or logging is safer for now.
+        });
+      }
+    });
+  });
+  return authPromise;
+};
